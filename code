@@ -1,0 +1,80 @@
+# AI Sales Growth Assistant MVP (Streamlit + OpenAI)
+
+import streamlit as st
+import pandas as pd
+import openai
+from textblob import TextBlob
+from prophet import Prophet
+
+# Set your OpenAI API key
+openai.api_key = "your-openai-api-key"
+
+st.title("📈 AI Sales Growth Assistant")
+st.write("Upload your product reviews and sales data to get smart suggestions for increasing online sales.")
+
+# Upload section
+reviews_file = st.file_uploader("Upload Reviews CSV", type=["csv"])
+sales_file = st.file_uploader("Upload Sales Data CSV", type=["csv"])
+
+def analyze_sentiment(reviews_df):
+    reviews_df["sentiment"] = reviews_df["review"].apply(lambda x: TextBlob(str(x)).sentiment.polarity)
+    return reviews_df
+
+def summarize_reviews(reviews_df):
+    pos = reviews_df[reviews_df["sentiment"] > 0.1]["review"]
+    neg = reviews_df[reviews_df["sentiment"] < -0.1]["review"]
+    return f"Positive:
+{pos.head(5).to_list()}
+\nNegative:
+{neg.head(5).to_list()}"
+
+def forecast_sales(sales_df):
+    df = sales_df.rename(columns={"date": "ds", "sales": "y"})
+    df["ds"] = pd.to_datetime(df["ds"])
+    model = Prophet()
+    model.fit(df)
+    future = model.make_future_dataframe(periods=30)
+    forecast = model.predict(future)
+    return forecast[["ds", "yhat"]]
+
+def get_ai_suggestions(review_summary, trend_summary):
+    prompt = f"""
+    Based on these product reviews:
+    {review_summary}
+
+    And this sales trend forecast:
+    {trend_summary}
+
+    Suggest 5 actionable strategies to grow online sales.
+    """
+    response = openai.ChatCompletion.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7
+    )
+    return response['choices'][0]['message']['content']
+
+if reviews_file and sales_file:
+    reviews_df = pd.read_csv(reviews_file)
+    sales_df = pd.read_csv(sales_file)
+
+    with st.spinner("Analyzing reviews..."):
+        reviews_df = analyze_sentiment(reviews_df)
+        review_summary = summarize_reviews(reviews_df)
+
+    with st.spinner("Forecasting sales trends..."):
+        forecast_df = forecast_sales(sales_df)
+        trend_summary = forecast_df.tail(5).to_string(index=False)
+        st.line_chart(forecast_df.set_index("ds"))
+
+    with st.spinner("Generating suggestions with GPT..."):
+        suggestions = get_ai_suggestions(review_summary, trend_summary)
+
+    st.subheader("📌 AI Suggestions to Grow Sales")
+    st.markdown(suggestions)
+
+    st.subheader("🔍 Review Sentiment Breakdown")
+    st.write(reviews_df[["review", "sentiment"]].head(10))
+
+    st.subheader("📊 Sales Forecast (Next 30 Days)")
+    st.write(forecast_df.tail(10))
